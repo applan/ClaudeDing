@@ -41,7 +41,7 @@ Run these two lines inside Claude Code:
 
 ```text
 /plugin marketplace add applan/ClaudeDing
-/plugin install claude-alarm@claude-alarm-market
+/plugin install claudeding@claudeding
 ```
 
 That's it! 🎉 Notifications start from your next session.
@@ -80,8 +80,8 @@ Nothing to launch — it works automatically. 🛋️
 
 ```text
 ClaudeDing/
-├─ .claude-plugin/marketplace.json     # marketplace: claude-alarm-market
-├─ claude-alarm/                        # the plugin
+├─ .claude-plugin/marketplace.json     # marketplace: claudeding
+├─ claudeding/                          # the plugin
 │  ├─ .claude-plugin/plugin.json
 │  ├─ hooks/hooks.json                  # Stop hook → runs the script
 │  └─ scripts/notify-complete.ps1       # the notifier (UTF-8 with BOM)

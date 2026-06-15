@@ -41,7 +41,7 @@ Claude Code 안에서 아래 두 줄을 실행하세요:
 
 ```text
 /plugin marketplace add applan/ClaudeDing
-/plugin install claude-alarm@claude-alarm-market
+/plugin install claudeding@claudeding
 ```
 
 끝이에요! 🎉 다음 세션부터 알림이 뜹니다.
@@ -80,8 +80,8 @@ Claude Code 안에서 아래 두 줄을 실행하세요:
 
 ```text
 ClaudeDing/
-├─ .claude-plugin/marketplace.json     # 마켓플레이스: claude-alarm-market
-├─ claude-alarm/                        # 플러그인 본체
+├─ .claude-plugin/marketplace.json     # 마켓플레이스: claudeding
+├─ claudeding/                          # 플러그인 본체
 │  ├─ .claude-plugin/plugin.json
 │  ├─ hooks/hooks.json                  # Stop hook → 스크립트 실행
 │  └─ scripts/notify-complete.ps1       # 알림 스크립트 (UTF-8 BOM)

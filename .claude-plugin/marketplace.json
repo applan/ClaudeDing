@@ -1,12 +1,12 @@
 {
-  "name": "claude-alarm-market",
+  "name": "claudeding",
   "owner": {
     "name": "applan"
   },
   "plugins": [
     {
-      "name": "claude-alarm",
-      "source": "./claude-alarm",
+      "name": "claudeding",
+      "source": "./claudeding",
       "description": "Claude CLI 작업 완료 시 Windows 토스트 알림"
     }
   ]
