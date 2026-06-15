@@ -1,9 +1,9 @@
 {
   "name": "claudeding",
-  "version": "1.0.0",
-  "description": "Claude CLI 작업이 완료되면 어떤 내용이 끝났는지 정리해서 Windows 토스트 알림으로 띄웁니다.",
+  "version": "1.1.0",
+  "description": "Claude CLI 작업 완료·입력 대기를 Windows 토스트로 알리고, 미응답 시 리마인드하며, 클릭하면 해당 터미널 창으로 복귀합니다.",
   "author": {
     "name": "applan"
   },
-  "keywords": ["notification", "toast", "windows", "hook", "stop"]
+  "keywords": ["notification", "toast", "windows", "hook", "stop", "reminder"]
 }
