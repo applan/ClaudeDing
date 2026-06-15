@@ -1,85 +1,58 @@
-﻿# notify-complete.ps1  (ClaudeDing)
+﻿# notify-complete.ps1  (ClaudeDing) — hook 진입점
 # Claude Code 의 hook 에서 호출된다. stdin 으로 hook JSON 을 받아 Windows 토스트 알림을 띄운다.
-#   - Stop 이벤트        : 작업 완료 → 트랜스크립트의 마지막 assistant 응답(요약)을 알림
-#   - Notification 이벤트 : 입력/권한 선택 대기 → 그 메시지를 알림
-# 외부 모듈 없이 Windows 내장 API 만 사용한다.
+#   - Stop 이벤트             : 작업 완료 → 마지막 응답 요약을 알림 + 대기 리마인드 해제
+#   - Notification 이벤트      : 입력/권한 선택 대기 → 한국어로 알림 + 리마인드 시작
+#   - UserPromptSubmit 이벤트  : 사용자가 응답함 → 대기 리마인드 해제(토스트 없음)
+# 알림 클릭 시 claudeding:// 프로토콜로 해당 터미널 창을 최상단 복귀시킨다.
 # hook 이 절대 깨지지 않도록 모든 동작을 try/catch 로 감싸고 항상 0 으로 종료한다.
 
-$ErrorActionPreference = 'Stop'
-$logPath = Join-Path $env:USERPROFILE '.claude\notify-complete.log'
+$scriptStart = Get-Date
+. (Join-Path $PSScriptRoot '_common.ps1')
+Initialize-State
 
-function Write-Log($msg) {
-    try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $msg" | Out-File -FilePath $logPath -Append -Encoding utf8 } catch {}
-}
+# Notification 대기 시 일정 주기로 다시 알려주는 백그라운드 리마인드 루프를 띄운다.
+function Start-Reminder($hook, $key, $title, $body, $win) {
+    $cfg = Get-Config
+    if ($cfg.IntervalMs -le 0) { return }   # 설정으로 비활성
 
-function Show-Toast {
-    param([string]$Title, [string]$Body)
+    $transcript = [string]$hook.transcript_path
+    $tlen = 0
+    try { if ($transcript -and (Test-Path $transcript)) { $tlen = (Get-Item -LiteralPath $transcript).Length } } catch {}
 
-    [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
-    [void][Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType = WindowsRuntime]
-    [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
-
-    # 알림이 "ClaudeDing" 이름으로 뜨도록 전용 AppUserModelID 를 등록한다(없으면 생성).
-    # HKCU 라 관리자 권한 불필요, 멱등이라 매번 실행해도 안전하다.
-    $appId = 'ClaudeDing'
-    $key = "HKCU:\Software\Classes\AppUserModelId\$appId"
-    if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
-    New-ItemProperty -Path $key -Name 'DisplayName' -Value 'ClaudeDing' -PropertyType String -Force | Out-Null
-
-    $tEsc = [System.Security.SecurityElement]::Escape($Title)
-    $bEsc = [System.Security.SecurityElement]::Escape($Body)
-
-    $xmlText = @"
-<toast activationType="protocol" launch="">
-  <visual>
-    <binding template="ToastGeneric">
-      <text>$tEsc</text>
-      <text>$bEsc</text>
-    </binding>
-  </visual>
-  <audio src="ms-winsoundevent:Notification.Default"/>
-</toast>
-"@
-
-    $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-    $xml.LoadXml($xmlText)
-    $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
-    [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
-
-    # 토스트 전달은 비동기다. 여기서 바로 프로세스가 종료되면 토스트가 플랫폼에
-    # 전달되기 전에 죽어 알림이 안 보일 수 있으므로 잠깐 대기한다.
-    Start-Sleep -Milliseconds 1200
-}
-
-# 트랜스크립트(JSONL)에서 마지막 assistant 텍스트 응답을 뽑아 한 줄 요약으로 만든다.
-function Get-Summary($transcript) {
-    if (-not ($transcript -and (Test-Path $transcript))) {
-        Write-Log "트랜스크립트 없음: $transcript"
-        return '작업이 완료되었습니다.'
+    $lock = [pscustomobject]@{
+        title         = $title
+        body          = $body
+        transcript    = $transcript
+        transcriptLen = $tlen
+        intervalMs    = $cfg.IntervalMs
+        max           = $cfg.Max
+        winPid        = if ($win) { [int]$win.pid } else { 0 }
+        winHwnd       = if ($win) { [long]$win.hwnd } else { 0 }
+        started       = (Get-Date).ToString('o')
+        reminderPid   = 0
     }
-    $summary = $null
-    $lines = @(Get-Content -LiteralPath $transcript -Tail 600 -Encoding utf8)
-    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
-        $line = $lines[$i]
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try { $obj = $line | ConvertFrom-Json } catch { continue }
-        if ($obj.type -ne 'assistant') { continue }
-        $texts = @()
-        foreach ($block in $obj.message.content) {
-            if ($block.type -eq 'text' -and $block.text) { $texts += $block.text }
-        }
-        if ($texts.Count -gt 0) { $summary = ($texts -join "`n").Trim(); break }
-    }
-    if ([string]::IsNullOrWhiteSpace($summary)) { return '작업이 완료되었습니다.' }
-    return $summary
-}
 
-# 알림 본문 정리: 마크다운 기호 제거 + 한 줄로 + 길이 제한
-function Format-Body($text) {
-    $t = $text -replace '`{1,3}', '' -replace '(?m)^\s*#{1,6}\s*', '' -replace '\*\*', ''
-    $t = ($t -split "`n" | Where-Object { $_.Trim() -ne '' }) -join ' / '
-    if ($t.Length -gt 250) { $t = $t.Substring(0, 250) + '…' }
-    return $t
+    # 이미 살아있는 리마인드 루프가 있으면 잠금만 갱신(중복 루프 방지).
+    $alive = $false
+    $existing = Get-ReminderLock $key
+    if ($existing -and $existing.reminderPid) {
+        try {
+            $p = Get-Process -Id ([int]$existing.reminderPid) -ErrorAction Stop
+            if ($p.ProcessName -like 'powershell*') { $alive = $true; $lock.reminderPid = $existing.reminderPid }
+        } catch {}
+    }
+    Set-ReminderLock $key $lock
+
+    if (-not $alive) {
+        try {
+            $loop = Join-Path $PSScriptRoot 'remind-loop.ps1'
+            $p = Start-Process -FilePath 'powershell' -WindowStyle Hidden -PassThru -ArgumentList @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $loop, $key
+            )
+            $lock.reminderPid = $p.Id
+            Set-ReminderLock $key $lock
+        } catch { Write-Log "리마인드 시작 실패: $($_.Exception.Message)" }
+    }
 }
 
 try {
@@ -88,24 +61,58 @@ try {
 
     $hook = $raw | ConvertFrom-Json
     $event = $hook.hook_event_name
+    $key = Get-SessionKey $hook
     $cwd = $hook.cwd
     $project = if ($cwd) { Split-Path $cwd -Leaf } else { 'Claude Code' }
     $time = Get-Date -Format 'HH:mm'
 
-    if ($event -eq 'Notification') {
-        # 입력/권한 선택 대기
-        $msg = if ($hook.message) { [string]$hook.message } else { '입력 또는 선택을 기다리고 있어요.' }
-        $title = "🔔 Claude 입력 대기 · $project ($time)"
-        $body  = Format-Body $msg
-    }
-    else {
-        # Stop (작업 완료) 및 기타
-        $title = "✅ Claude 작업 완료 · $project ($time)"
-        $body  = Format-Body (Get-Summary $hook.transcript_path)
+    # 사용자가 응답한 신호 → 대기 리마인드만 해제하고 종료(토스트 없음).
+    if ($event -eq 'UserPromptSubmit') {
+        Remove-ReminderLock $key
+        Write-Log "리마인드 해제(입력 제출) [$key]"
+        return
     }
 
-    Show-Toast -Title $title -Body $body
+    # 클릭 복귀 대상 창: 토스트 전에는 캐시만 빠르게 읽는다(WMI 호출은 토스트 뒤로 미룸).
+    $win = Get-CachedWindow $key
+    $winPid  = if ($win) { [int]$win.pid }  else { 0 }
+    $winHwnd = if ($win) { [long]$win.hwnd } else { 0 }
+
+    $parseMs = 0
+    if ($event -eq 'Notification') {
+        $title = "🔔 입력 대기 · $project ($time)"
+        $body  = Format-Notice $hook.message
+        Show-Toast -Title $title -Body $body -LaunchPid $winPid -LaunchHwnd $winHwnd -Tag $key
+        # 토스트를 띄운 뒤 창을 확정·캐시한다(체감 지연에 영향 없음). 리마인드/다음 알림부터 클릭 복귀 동작.
+        if (-not $win) { $win = Get-TerminalWindow $key }
+        Start-Reminder $hook $key $title $body $win
+    }
+    else {
+        # Stop(작업 완료) 및 기타 — 대기 중이었다면 해제.
+        Remove-ReminderLock $key
+        $pw = [Diagnostics.Stopwatch]::StartNew()
+        $summary = Get-Summary $hook.transcript_path
+        $pw.Stop(); $parseMs = $pw.ElapsedMilliseconds
+        $title = "✅ 작업 완료 · $project ($time)"
+        $body  = Format-Summary $summary
+        Show-Toast -Title $title -Body $body -LaunchPid $winPid -LaunchHwnd $winHwnd
+        # 다음 알림의 클릭 복귀를 위해 창을 캐시(토스트 뒤라 지연 없음).
+        if (-not $win) { $null = Get-TerminalWindow $key }
+    }
+
     Write-Log "알림 표시 [$event]: $title | $body"
+
+    # ── 지연 구간 측정 ──
+    try { $startupMs = [int]((New-TimeSpan -Start (Get-Process -Id $PID).StartTime -End $scriptStart).TotalMilliseconds) }
+    catch { $startupMs = -1 }
+    $showAt = if ($script:LastShowAt) { $script:LastShowAt } else { Get-Date }
+    $totalMs = [int]((New-TimeSpan -Start $scriptStart -End $showAt).TotalMilliseconds)
+    $toasts = '?'
+    try {
+        $v = Get-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings' -Name 'NOC_GLOBAL_SETTING_TOASTS_ENABLED' -ErrorAction Stop
+        $toasts = $v.NOC_GLOBAL_SETTING_TOASTS_ENABLED
+    } catch { $toasts = '?' }
+    Write-Perf $event $startupMs $script:LastWinrtMs $parseMs $totalMs $toasts
 }
 catch {
     Write-Log "오류: $($_.Exception.Message)"

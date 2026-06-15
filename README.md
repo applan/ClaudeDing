@@ -26,14 +26,16 @@ You kick off a long task in Claude Code, switch to another window... and forget 
 
 **ClaudeDing** taps you on the shoulder. Two kinds of dings:
 
-> ✅ **Claude task done · my-project (21:00)**
-> Created notify-complete.ps1 and wired up the Stop hook. Notifications now pop when work finishes…
+> ✅ **Task done · my-project (21:00)**
+> Created notify-complete.ps1 and wired up the Stop hook.
 
-> 🔔 **Claude needs input · my-project (21:05)**
-> Claude needs your permission to use Bash
+> 🔔 **Waiting · my-project (21:05)**
+> Waiting for permission to use Bash.
 
-- ✅ **Done** — hooks into the **`Stop`** event, reads the transcript, and shows Claude's **last message** as a summary.
-- 🔔 **Needs you** — hooks into the **`Notification`** event, so you're pinged when Claude is waiting for input or a permission choice (no more staring at an idle terminal).
+- ✅ **Done** — hooks into the **`Stop`** event, reads the transcript, and shows Claude's last message as **one clean line** (URLs, checklists, and markdown stripped out).
+- 🔔 **Needs you** — hooks into the **`Notification`** event, so you're pinged when Claude is waiting for input or a permission choice. English messages are rewritten in natural language so you can see *what* (e.g. which tool) it's waiting on.
+- 👆 **Click to return** — clicking a toast brings the **terminal window** Claude was running in back to the foreground.
+- ⏰ **Reminders** — if you leave it waiting, it re-pings on a configurable interval (default **1 min**) until you respond.
 - 🍃 **Zero dependencies** — uses Windows' built-in toast API. No modules to install.
 
 ---
@@ -64,7 +66,28 @@ Nothing to launch — it works automatically. 🛋️
 - **When a task finishes** → the **`Stop`** hook fires → `notify-complete.ps1` reads the transcript, builds a one-line summary, and shows a ✅ toast.
 - **When Claude needs you** → the **`Notification`** hook fires → the same script shows a 🔔 toast with what it's waiting for (e.g. a permission prompt).
 
+- **If you don't respond** → the **`Notification`** toast re-fires on your configured interval. It stops automatically once you submit input (`UserPromptSubmit`) or work resumes.
+- **When you click a toast** → the `claudeding://` protocol finds that session's terminal window and **focuses** it.
+
 **Turn it on/off** anytime from the `/plugin` menu.
+
+---
+
+## ⏰ Reminders
+
+Leave an input/permission toast unanswered and it re-pings on an interval. Tune it in `~/.claude/claudeding.config.json` (defaults apply if the file is absent):
+
+```json
+{
+  "remindInterval": "1m",
+  "remindMax": 10
+}
+```
+
+- **`remindInterval`** — how often to re-ping. Use `30s`, `1m`, `2h`; a bare number means minutes. Set `"off"` or `"0"` to disable. Default `1m` (min 5s to avoid spam).
+- **`remindMax`** — max reminders per wait. `0` means unlimited. Default `10`.
+
+> Reminders stop the moment you respond, so you usually get one or two and that's it.
 
 ---
 
@@ -73,7 +96,10 @@ Nothing to launch — it works automatically. 🛋️
 | Want to... | Do this |
 |---|---|
 | 🔕 See it less often | `Stop` fires every turn, so even short chats ding. Add a condition in `scripts/notify-complete.ps1`. |
+| ⏰ Turn off reminders | Set `remindInterval` to `"off"` in `~/.claude/claudeding.config.json`. |
 | 🐛 Debug | Check the log at `~/.claude/notify-complete.log`. |
+| 🐢 Toasts sometimes lag | Check `~/.claude/notify-perf.log`. A large `startup` value means PowerShell cold-start; small `startup` but still late points to **Focus assist**. |
+| 🖱️ Click doesn't focus | Windows Terminal only restores at the **window** level (a specific tab can't be picked). If the window was closed, there's nothing to return to. |
 | 🙈 No toast appears | Check **Windows → Notifications** are on, and **Focus assist / Do Not Disturb** is off. |
 
 ---
@@ -85,8 +111,13 @@ ClaudeDing/
 ├─ .claude-plugin/marketplace.json     # marketplace: claudeding
 ├─ claudeding/                          # the plugin
 │  ├─ .claude-plugin/plugin.json
-│  ├─ hooks/hooks.json                  # Stop + Notification hooks → run the script
-│  └─ scripts/notify-complete.ps1       # the notifier (UTF-8 with BOM)
+│  ├─ hooks/hooks.json                  # Stop · Notification · UserPromptSubmit hooks
+│  └─ scripts/                          # all UTF-8 with BOM
+│     ├─ notify-complete.ps1            #   hook entry (toast + start/clear reminders)
+│     ├─ _common.ps1                    #   shared: toast, config, copy, window-find, locks
+│     ├─ remind-loop.ps1               #   background reminder loop
+│     ├─ focus.ps1                      #   click handler — focuses the terminal window
+│     └─ focus.vbs                      #   windowless launcher for focus.ps1 (no console flash)
 ├─ README.md                            # you are here 🇺🇸
 └─ README.ko.md                         # 🇰🇷
 ```
