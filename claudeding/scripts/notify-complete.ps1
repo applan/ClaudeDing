@@ -19,8 +19,12 @@ function Show-Toast {
     [void][Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType = WindowsRuntime]
     [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
 
-    # PowerShell 이 미리 등록되어 있는 AppUserModelID (토스트가 안정적으로 표시됨)
-    $appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+    # 알림이 "ClaudeDing" 이름으로 뜨도록 전용 AppUserModelID 를 등록한다(없으면 생성).
+    # HKCU 라 관리자 권한 불필요, 멱등이라 매번 실행해도 안전하다.
+    $appId = 'ClaudeDing'
+    $key = "HKCU:\Software\Classes\AppUserModelId\$appId"
+    if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+    New-ItemProperty -Path $key -Name 'DisplayName' -Value 'ClaudeDing' -PropertyType String -Force | Out-Null
 
     $tEsc = [System.Security.SecurityElement]::Escape($Title)
     $bEsc = [System.Security.SecurityElement]::Escape($Body)
