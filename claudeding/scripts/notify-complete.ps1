@@ -1,8 +1,8 @@
-﻿# notify-complete.ps1
-# Claude Code 의 Stop hook 에서 호출된다.
-# stdin 으로 hook JSON 을 받아서, 트랜스크립트의 마지막 assistant 응답(작업 요약)을
-# Windows 토스트 알림으로 띄운다. 외부 모듈 없이 Windows 내장 API 만 사용.
-#
+﻿# notify-complete.ps1  (ClaudeDing)
+# Claude Code 의 hook 에서 호출된다. stdin 으로 hook JSON 을 받아 Windows 토스트 알림을 띄운다.
+#   - Stop 이벤트        : 작업 완료 → 트랜스크립트의 마지막 assistant 응답(요약)을 알림
+#   - Notification 이벤트 : 입력/권한 선택 대기 → 그 메시지를 알림
+# 외부 모듈 없이 Windows 내장 API 만 사용한다.
 # hook 이 절대 깨지지 않도록 모든 동작을 try/catch 로 감싸고 항상 0 으로 종료한다.
 
 $ErrorActionPreference = 'Stop'
@@ -41,61 +41,67 @@ function Show-Toast {
     $xml.LoadXml($xmlText)
     $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
     [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
+
+    # 토스트 전달은 비동기다. 여기서 바로 프로세스가 종료되면 토스트가 플랫폼에
+    # 전달되기 전에 죽어 알림이 안 보일 수 있으므로 잠깐 대기한다.
+    Start-Sleep -Milliseconds 1200
+}
+
+# 트랜스크립트(JSONL)에서 마지막 assistant 텍스트 응답을 뽑아 한 줄 요약으로 만든다.
+function Get-Summary($transcript) {
+    if (-not ($transcript -and (Test-Path $transcript))) {
+        Write-Log "트랜스크립트 없음: $transcript"
+        return '작업이 완료되었습니다.'
+    }
+    $summary = $null
+    $lines = @(Get-Content -LiteralPath $transcript -Tail 600 -Encoding utf8)
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        $line = $lines[$i]
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try { $obj = $line | ConvertFrom-Json } catch { continue }
+        if ($obj.type -ne 'assistant') { continue }
+        $texts = @()
+        foreach ($block in $obj.message.content) {
+            if ($block.type -eq 'text' -and $block.text) { $texts += $block.text }
+        }
+        if ($texts.Count -gt 0) { $summary = ($texts -join "`n").Trim(); break }
+    }
+    if ([string]::IsNullOrWhiteSpace($summary)) { return '작업이 완료되었습니다.' }
+    return $summary
+}
+
+# 알림 본문 정리: 마크다운 기호 제거 + 한 줄로 + 길이 제한
+function Format-Body($text) {
+    $t = $text -replace '`{1,3}', '' -replace '(?m)^\s*#{1,6}\s*', '' -replace '\*\*', ''
+    $t = ($t -split "`n" | Where-Object { $_.Trim() -ne '' }) -join ' / '
+    if ($t.Length -gt 250) { $t = $t.Substring(0, 250) + '…' }
+    return $t
 }
 
 try {
-    # 1) stdin 에서 hook JSON 읽기
     $raw = [Console]::In.ReadToEnd()
     if ([string]::IsNullOrWhiteSpace($raw)) { Write-Log 'stdin 비어있음'; return }
 
     $hook = $raw | ConvertFrom-Json
-    $transcript = $hook.transcript_path
+    $event = $hook.hook_event_name
     $cwd = $hook.cwd
-
     $project = if ($cwd) { Split-Path $cwd -Leaf } else { 'Claude Code' }
-
-    # 2) 트랜스크립트(JSONL)에서 마지막 assistant 텍스트 응답 추출
-    $summary = $null
-    if ($transcript -and (Test-Path $transcript)) {
-        # 최근 줄만 읽어서 뒤에서부터 텍스트가 있는 assistant 메시지를 찾는다
-        $lines = Get-Content -LiteralPath $transcript -Tail 600 -Encoding utf8
-        for ($i = $lines.Count - 1; $i -ge 0; $i--) {
-            $line = $lines[$i]
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            try { $obj = $line | ConvertFrom-Json } catch { continue }
-            if ($obj.type -ne 'assistant') { continue }
-
-            $content = $obj.message.content
-            $texts = @()
-            foreach ($block in $content) {
-                if ($block.type -eq 'text' -and $block.text) { $texts += $block.text }
-            }
-            if ($texts.Count -gt 0) {
-                $summary = ($texts -join "`n").Trim()
-                break
-            }
-        }
-    } else {
-        Write-Log "트랜스크립트 없음: $transcript"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($summary)) {
-        $summary = '작업이 완료되었습니다.'
-    }
-
-    # 3) 본문 정리: 마크다운 헤더/기호 약간 정리하고 길이 제한
-    $summary = $summary -replace '`{1,3}', '' -replace '^\s*#{1,6}\s*', '' -replace '\*\*', ''
-    $summary = ($summary -split "`n" | Where-Object { $_.Trim() -ne '' }) -join ' / '
-    $maxLen = 250
-    if ($summary.Length -gt $maxLen) {
-        $summary = $summary.Substring(0, $maxLen) + '…'
-    }
-
     $time = Get-Date -Format 'HH:mm'
-    $title = "✅ Claude 작업 완료 · $project ($time)"
 
-    Show-Toast -Title $title -Body $summary
-    Write-Log "알림 표시: $title | $summary"
+    if ($event -eq 'Notification') {
+        # 입력/권한 선택 대기
+        $msg = if ($hook.message) { [string]$hook.message } else { '입력 또는 선택을 기다리고 있어요.' }
+        $title = "🔔 Claude 입력 대기 · $project ($time)"
+        $body  = Format-Body $msg
+    }
+    else {
+        # Stop (작업 완료) 및 기타
+        $title = "✅ Claude 작업 완료 · $project ($time)"
+        $body  = Format-Body (Get-Summary $hook.transcript_path)
+    }
+
+    Show-Toast -Title $title -Body $body
+    Write-Log "알림 표시 [$event]: $title | $body"
 }
 catch {
     Write-Log "오류: $($_.Exception.Message)"

@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/scripts/notify-complete.ps1\"",
+            "async": true,
+            "timeout": 20
+          }
+        ]
+      }
     ]
   }
 }
