@@ -225,6 +225,13 @@ function Format-Body($text) {
     return $t
 }
 
+# 권한 승인 대기인지 판별. 권한 대기는 Claude 가 작업 도중 막혀 있으므로 리마인드가 유용하다.
+# 그 외(입력 대기 등 "모든 작업이 끝난 뒤 대기" 상태)는 한 번만 울리고 끝낸다.
+function Test-PermissionNotice($msg) {
+    $m = ([string]$msg).Trim()
+    return ($m -match '(?i)permission')
+}
+
 # Notification 메시지(영어)를 상황별 자연스러운 한국어로 변환.
 function Format-Notice($msg) {
     $m = ([string]$msg).Trim()

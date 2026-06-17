@@ -35,7 +35,7 @@ You kick off a long task in Claude Code, switch to another window... and forget 
 - ✅ **Done** — hooks into the **`Stop`** event, reads the transcript, and shows Claude's last message as **one clean line** (URLs, checklists, and markdown stripped out).
 - 🔔 **Needs you** — hooks into the **`Notification`** event, so you're pinged when Claude is waiting for input or a permission choice. English messages are rewritten in natural language so you can see *what* (e.g. which tool) it's waiting on.
 - 👆 **Click to return** — clicking a toast brings the **terminal window** Claude was running in back to the foreground.
-- ⏰ **Reminders** — if you leave it waiting, it re-pings on a configurable interval (default **1 min**) until you respond.
+- ⏰ **Reminders** — leave a **permission prompt** (Claude blocked mid-task) unanswered and it re-pings on a configurable interval (default **1 min**) until you respond. The **idle "waiting for input"** toast after everything is done rings just once.
 - 🍃 **Zero dependencies** — uses Windows' built-in toast API. No modules to install.
 
 ---
@@ -75,7 +75,7 @@ Nothing to launch — it works automatically. 🛋️
 
 ## ⏰ Reminders
 
-Leave an input/permission toast unanswered and it re-pings on an interval. Tune it in `~/.claude/claudeding.config.json` (defaults apply if the file is absent):
+Leave a **permission prompt** (Claude blocked mid-task) unanswered and it re-pings on an interval. The idle **"waiting for input"** toast after all tasks finish rings only once. Tune it in `~/.claude/claudeding.config.json` (defaults apply if the file is absent):
 
 ```json
 {

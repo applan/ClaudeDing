@@ -85,7 +85,13 @@ try {
         Show-Toast -Title $title -Body $body -LaunchPid $winPid -LaunchHwnd $winHwnd -Tag $key
         # 토스트를 띄운 뒤 창을 확정·캐시한다(체감 지연에 영향 없음). 리마인드/다음 알림부터 클릭 복귀 동작.
         if (-not $win) { $win = Get-TerminalWindow $key }
-        Start-Reminder $hook $key $title $body $win
+        # 권한 승인 대기(작업 도중 막힘)만 리마인드한다. 모든 작업이 끝난 뒤의 입력 대기 상태는
+        # 한 번만 울리고 끝낸다(이전에 남아있을 수 있는 리마인드 루프도 해제).
+        if (Test-PermissionNotice $hook.message) {
+            Start-Reminder $hook $key $title $body $win
+        } else {
+            Remove-ReminderLock $key
+        }
     }
     else {
         # Stop(작업 완료) 및 기타 — 대기 중이었다면 해제.

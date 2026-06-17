@@ -1,6 +1,6 @@
 {
   "name": "claudeding",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Claude CLI 작업 완료·입력 대기를 Windows 토스트로 알리고, 미응답 시 리마인드하며, 클릭하면 해당 터미널 창으로 복귀합니다.",
   "author": {
     "name": "applan"
